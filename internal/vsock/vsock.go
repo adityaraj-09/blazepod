@@ -1,20 +1,11 @@
 // Layer: host-agent internal — vsock client for communicating with the in-VM Rust agent.
-// vsock (AF_VSOCK) is a socket family for VM↔host communication that bypasses
-// the virtual network stack, providing lower latency and stronger isolation than
-// TCP over the veth pair.
-//
-// The Rust vm-agent listens on a well-known vsock port inside the guest.
-// The host-agent connects via the vsock CID assigned to the Firecracker VM.
-//
-// On Linux: go.sum includes golang.org/x/sys which exposes syscall.SockaddrVM.
-// On macOS this package compiles but vsock Dial will fail at runtime (expected —
-// vsock is a Linux KVM feature).
+// Firecracker exposes guest vsock on a host Unix socket (uds_path). The host sends
+// "CONNECT <port>\n" and receives "OK <port>\n" before application data flows.
 package vsock
 
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 )
 
@@ -38,18 +29,15 @@ type ExecResponse struct {
 	DurationMs int64  `json:"duration_ms"`
 }
 
-// Exec dials the vm-agent inside the VM identified by cid (vsock context ID),
-// sends an ExecRequest, waits for the process to finish, and returns ExecResponse.
-//
-// cid is assigned by Firecracker and stored in the SandboxRecord at provisioning time.
-func Exec(cid uint32, req ExecRequest) (*ExecResponse, error) {
-	conn, err := dial(cid, ExecPort)
+// Exec dials vm-agent inside the VM through Firecracker's vsock UDS and runs a command.
+// udsPath is the Firecracker vsock.sock path for this sandbox.
+func Exec(udsPath string, req ExecRequest) (*ExecResponse, error) {
+	conn, err := dialFirecracker(udsPath, ExecPort)
 	if err != nil {
-		return nil, fmt.Errorf("vsock: dial cid %d port %d: %w", cid, ExecPort, err)
+		return nil, fmt.Errorf("vsock: dial %s port %d: %w", udsPath, ExecPort, err)
 	}
 	defer conn.Close()
 
-	// Set a generous read deadline equal to the command timeout plus headroom.
 	deadlineDur := time.Duration(req.TimeoutMs)*time.Millisecond + 5*time.Second
 	_ = conn.SetDeadline(time.Now().Add(deadlineDur))
 
@@ -62,10 +50,4 @@ func Exec(cid uint32, req ExecRequest) (*ExecResponse, error) {
 		return nil, fmt.Errorf("vsock: decode response: %w", err)
 	}
 	return &resp, nil
-}
-
-// dial opens an AF_VSOCK connection to the given CID and port.
-// Implemented in vsock_linux.go (Linux) and vsock_stub.go (other OS).
-func dial(cid uint32, port uint32) (net.Conn, error) {
-	return dialVsock(cid, port)
 }

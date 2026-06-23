@@ -41,7 +41,8 @@ type sandboxEntry struct {
 	sandboxID     string
 	tenantID      string
 	pid           int               // OS PID of the firecracker process
-	vsockCID      uint32            // KVM vsock context ID for this VM
+	vsockCID      uint32            // guest vsock context ID (for API visibility)
+	vsockUDS      string            // Firecracker vsock.sock path used for exec
 	vmAgentSocket string            // Unix socket path for vm-agent (dev mode when vsock unavailable)
 	cgroupDir     string            // absolute path to the cgroup directory
 	cancel        context.CancelFunc
@@ -278,6 +279,7 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 		tenantID:  req.TenantId,
 		pid:       fcCmd.Process.Pid,
 		vsockCID:  vsockCID,
+		vsockUDS:  vsockUDS,
 		cgroupDir: cgroupDir,
 		cancel:    cancel,
 	}
@@ -348,7 +350,7 @@ func (s *hostAgentServer) ExecInSandbox(_ context.Context, req *ExecRequest) (*E
 	}
 
 	execStart := time.Now()
-	resp, err := vsock.Exec(entry.vsockCID, vsock.ExecRequest{
+	resp, err := vsock.Exec(entry.vsockUDS, vsock.ExecRequest{
 		Command:   req.Command,
 		Stdin:     req.Stdin,
 		TimeoutMs: timeoutMs,
