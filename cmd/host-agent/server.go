@@ -80,10 +80,15 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 	startTime := time.Now()
 
 	// 1. Setup overlayfs: lowerdir=base rootfs, upperdir=per-sandbox writable layer.
+	// base_rootfs may be an ext4 file; overlayfs lowerdir must be a directory.
+	lowerDir, err := overlayLowerDir(s.cfg.BaseRootfs)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "overlay lowerdir: %v", err)
+	}
 	overlayCfg := overlay.Config{
 		SandboxID: req.SandboxId,
 		BaseDir:   s.cfg.SandboxDir,
-		LowerDir:  s.cfg.BaseRootfs,
+		LowerDir:  lowerDir,
 	}
 	paths, err := overlay.Setup(overlayCfg)
 	if err != nil {

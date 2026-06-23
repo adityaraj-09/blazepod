@@ -23,21 +23,18 @@ host_agent:
   agent_secret: "internal-secret-change-me"
   firecracker_bin: "/usr/local/bin/firecracker"
   jailer_bin: "/usr/local/bin/jailer"
-  kernel_image: "/var/sandock/images/vmlinux-5.10"
-  base_rootfs: "/var/sandock/images/base.ext4"
-  sandbox_dir: "/var/sandock/sandboxes"
-  snapshot_dir: "/var/sandock/snapshots"
+  kernel_image: "/var/lib/sandock/images/vmlinux-5.10.258"
+  base_rootfs: "/var/lib/sandock/images/base-rootfs.ext4"   # ext4 file or directory
+  sandbox_dir: "/var/lib/sandock/sandboxes"
+  snapshot_dir: "/var/lib/sandock/snapshots"
   metrics_addr: ":9100"
   # warm_pool_size is the number of idle VMs to keep pre-booted (Phase 2).
   warm_pool_size: 2
 
-# host_agents is the list of host-agents the orchestrator connects to (Phase 2 multi-host).
-# Each entry overrides the host_agent.grpc_addr default for that specific host.
-host_agents:
-  - id: "host-1"
-    http_addr: "10.0.0.1:9091"
-  - id: "host-2"
-    http_addr: "10.0.0.2:9091"
+# host_agents: Phase 2 multi-host only. Leave commented out for single-host EC2 setup.
+# host_agents:
+#   - id: "host-1"
+#     http_addr: "10.0.0.1:9091"
 
 redis:
   addr: "localhost:6379"
