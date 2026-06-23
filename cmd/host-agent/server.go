@@ -97,9 +97,13 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 	s.log.Debug("overlayfs mounted", zap.String("merged", paths.Merged))
 
 	// 2. Setup cgroup v2 resource limits for this sandbox.
+	// memory.max must exceed guest RAM — the Firecracker process maps the full guest
+	// region in its own address space. Add headroom so the VMM is not OOM-killed
+	// before the API socket comes up.
+	hostMemMiB := req.MemMib + 128
 	cgroupDir, err := cgroup.Setup(req.SandboxId, cgroup.Limits{
 		CPUMillis: req.CpuMillis,
-		MemoryMiB: req.MemMib,
+		MemoryMiB: hostMemMiB,
 	})
 	if err != nil {
 		// Clean up overlay on cgroup failure.
@@ -109,8 +113,15 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 	s.log.Debug("cgroup created", zap.String("cgroup_dir", cgroupDir))
 
 	// 3. Prepare the Firecracker socket path and rootfs path.
-	socketPath := filepath.Join(s.cfg.SandboxDir, req.SandboxId, "firecracker.sock")
-	rootfsDisk := filepath.Join(s.cfg.SandboxDir, req.SandboxId, "rootfs.ext4")
+	sandboxDir := filepath.Join(s.cfg.SandboxDir, req.SandboxId)
+	if err := os.MkdirAll(sandboxDir, 0755); err != nil {
+		_ = overlay.Teardown(overlayCfg)
+		_ = cgroup.Teardown(req.SandboxId)
+		return nil, status.Errorf(codes.Internal, "mkdir sandbox dir: %v", err)
+	}
+	socketPath := filepath.Join(sandboxDir, "firecracker.sock")
+	rootfsDisk := filepath.Join(sandboxDir, "rootfs.ext4")
+	fcLogPath := filepath.Join(sandboxDir, "fc.log")
 
 	// For Phase 1 we copy (or link) the base rootfs as the per-sandbox disk.
 	// Phase 2 will replace this with QCOW2 copy-on-write backed by the base image.
@@ -120,11 +131,20 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 		return nil, status.Errorf(codes.Internal, "rootfs copy: %v", err)
 	}
 
+	// Firecracker opens --log-path without O_CREAT; the file must exist beforehand.
+	if f, err := os.OpenFile(fcLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err != nil {
+		_ = overlay.Teardown(overlayCfg)
+		_ = cgroup.Teardown(req.SandboxId)
+		return nil, status.Errorf(codes.Internal, "create firecracker log %s: %v", fcLogPath, err)
+	} else {
+		_ = f.Close()
+	}
+
 	// 4. Start the Firecracker process. It will create the socket at socketPath.
 	vmCtx, cancel := context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
 	fcCmd := exec.CommandContext(vmCtx, s.cfg.FirecrackerBin,
 		"--api-sock", socketPath,
-		"--log-path", filepath.Join(s.cfg.SandboxDir, req.SandboxId, "fc.log"),
+		"--log-path", fcLogPath,
 	)
 	fcCmd.Stdout = os.Stdout
 	fcCmd.Stderr = os.Stderr
@@ -137,17 +157,10 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 	}
 	s.log.Info("firecracker process started", zap.Int("pid", fcCmd.Process.Pid))
 
-	// Move the Firecracker PID into the sandbox cgroup.
-	if err := cgroup.AddPID(req.SandboxId, fcCmd.Process.Pid); err != nil {
-		cancel()
-		_ = fcCmd.Process.Kill()
-		_ = overlay.Teardown(overlayCfg)
-		_ = cgroup.Teardown(req.SandboxId)
-		return nil, status.Errorf(codes.Internal, "cgroup addpid: %v", err)
-	}
-
-	// 5. Wait briefly for the Firecracker socket to appear, then configure the VM.
-	if err := waitForSocket(socketPath, 5*time.Second); err != nil {
+	// 5. Wait for the Firecracker API socket before configuring the VM.
+	// Do NOT add the process to the memory-limited cgroup yet — Firecracker needs
+	// a small host footprint during API setup; cgroup limits apply at boot time.
+	if err := waitForSocket(socketPath, fcLogPath, 15*time.Second); err != nil {
 		cancel()
 		_ = fcCmd.Process.Kill()
 		_ = overlay.Teardown(overlayCfg)
@@ -195,6 +208,15 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 	}
 
 	// 6. Boot the VM — cold start or snapshot restore.
+	// Apply cgroup limits to the Firecracker process right before guest RAM is mapped.
+	if err := cgroup.AddPID(req.SandboxId, fcCmd.Process.Pid); err != nil {
+		cancel()
+		_ = fcCmd.Process.Kill()
+		_ = overlay.Teardown(overlayCfg)
+		_ = cgroup.Teardown(req.SandboxId)
+		return nil, status.Errorf(codes.Internal, "cgroup addpid: %v", err)
+	}
+
 	if req.SnapshotKey != "" && s.snapManager.Exists(req.SnapshotKey) {
 		// Warm start: restore from Firecracker snapshot instead of booting kernel.
 		warmStart := time.Now()
@@ -416,7 +438,8 @@ func (s *hostAgentServer) watchVM(sandboxID string, cmd *exec.Cmd, overlayCfg ov
 }
 
 // waitForSocket polls for the existence of a Unix socket file up to timeout.
-func waitForSocket(path string, timeout time.Duration) error {
+// If fcLogPath is set, includes a tail of the Firecracker log in the error.
+func waitForSocket(path, fcLogPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
@@ -424,7 +447,18 @@ func waitForSocket(path string, timeout time.Duration) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Errorf("socket %s did not appear within %s", path, timeout)
+	err := fmt.Errorf("socket %s did not appear within %s", path, timeout)
+	if fcLogPath != "" {
+		if data, readErr := os.ReadFile(fcLogPath); readErr == nil && len(data) > 0 {
+			const maxTail = 2048
+			tail := data
+			if len(tail) > maxTail {
+				tail = tail[len(tail)-maxTail:]
+			}
+			err = fmt.Errorf("%w; firecracker log tail: %s", err, tail)
+		}
+	}
+	return err
 }
 
 // cid derives a deterministic vsock CID from a PID.
