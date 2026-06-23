@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"os/exec"
@@ -185,7 +186,7 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 
 	if err := fc.PutBootSource(cfgCtx, firecracker.BootSource{
 		KernelImagePath: s.cfg.KernelImage,
-		BootArgs:        "console=ttyS0 reboot=k panic=1 pci=off nomodules ro",
+		BootArgs:        "console=ttyS0 reboot=k panic=1 pci=off ip=169.254.0.2::169.254.0.1:255.255.255.0::eth0:off root=/dev/vda rw",
 	}); err != nil {
 		cancel()
 		_ = fcCmd.Process.Kill()
@@ -205,6 +206,20 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 		_ = overlay.Teardown(overlayCfg)
 		_ = cgroup.Teardown(req.SandboxId)
 		return nil, status.Errorf(codes.Internal, "firecracker drive: %v", err)
+	}
+
+	cid := guestCID(req.SandboxId)
+	vsockUDS := filepath.Join(sandboxDir, "vsock.sock")
+	_ = os.Remove(vsockUDS)
+	if err := fc.PutVsock(cfgCtx, firecracker.Vsock{
+		GuestCID: cid,
+		UDSPath:  vsockUDS,
+	}); err != nil {
+		cancel()
+		_ = fcCmd.Process.Kill()
+		_ = overlay.Teardown(overlayCfg)
+		_ = cgroup.Teardown(req.SandboxId)
+		return nil, status.Errorf(codes.Internal, "firecracker vsock: %v", err)
 	}
 
 	// 6. Boot the VM — cold start or snapshot restore.
@@ -248,9 +263,8 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 		s.log.Info("VM booted", zap.String("sandbox_id", req.SandboxId), zap.Float64("cold_start_s", coldStart))
 	}
 
-	// 7. Assign a vsock CID. Phase 1: use a simple deterministic counter.
-	// Phase 2: query /dev/kvm for the actual CID assigned by Firecracker.
-	vsockCID := cid(fcCmd.Process.Pid)
+	// 7. Record the guest vsock CID configured via PUT /vsock.
+	vsockCID := cid
 
 	// Track the running sandbox.
 	s.mu.Lock()
@@ -461,11 +475,11 @@ func waitForSocket(path, fcLogPath string, timeout time.Duration) error {
 	return err
 }
 
-// cid derives a deterministic vsock CID from a PID.
-// Real vsock CIDs are assigned by KVM; this is a Phase 1 placeholder.
-// A CID must be >= 3 (0=hypervisor, 1=local, 2=host).
-func cid(pid int) uint32 {
-	c := uint32(pid%10000) + 3
+// guestCID derives a stable vsock context ID (>= 3) from a sandbox ID.
+func guestCID(sandboxID string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(sandboxID))
+	c := (h.Sum32() % 65532) + 3
 	if c < 3 {
 		c = 3
 	}

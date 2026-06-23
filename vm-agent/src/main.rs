@@ -1,33 +1,22 @@
 // Layer: vm-agent — Rust in-VM exec service.
-// Runs inside every Firecracker microVM as PID 2 (after the init process).
-// Listens on a vsock port (AF_VSOCK) for JSON ExecRequest messages from the host-agent.
-// For each request it:
-//   1. Spawns the command as a child process.
-//   2. Collects stdout, stderr, exit code, and wall-clock duration.
-//   3. Sends an ExecResponse JSON back over the same connection.
+// Listens on AF_VSOCK port 8888 (production) or a Unix socket (VM_AGENT_DEV=1).
 //
-// Wire protocol: newline-delimited JSON (one ExecRequest per connection, one ExecResponse per connection).
-// This keeps the protocol simple for Phase 1; Phase 2 adds streaming stdout/stderr chunks.
-//
-// vsock port: 8888 (matches vsock::ExecPort in the Go host-agent).
-// vsock CID:  VMADDR_CID_ANY — listens for connections from any CID (host is CID 2).
+// Wire protocol: one newline-delimited JSON ExecRequest per connection,
+// one ExecResponse JSON line back.
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-// ExecRequest is the JSON command the host-agent sends over vsock.
+const EXEC_PORT: u32 = 8888;
+
 #[derive(Debug, Deserialize)]
 struct ExecRequest {
-    /// Shell command to run inside the VM (passed to /bin/sh -c).
     command: String,
-    /// Optional data written to the process stdin.
     #[serde(default)]
     stdin: String,
-    /// Maximum execution time in milliseconds.
     #[serde(default = "default_timeout")]
     timeout_ms: u64,
 }
@@ -36,7 +25,6 @@ fn default_timeout() -> u64 {
     30_000
 }
 
-// ExecResponse is the JSON result sent back to the host-agent.
 #[derive(Debug, Serialize)]
 struct ExecResponse {
     stdout: String,
@@ -46,28 +34,25 @@ struct ExecResponse {
 }
 
 fn main() {
-    // vsock listener setup.
-    // On Linux with KVM, replace UnixListener with a proper AF_VSOCK listener.
-    // For Phase 1 / development we bind a Unix socket at a known path so the
-    // Go test harness can talk to the agent without KVM.
-    //
-    // Phase 2: use the vsock crate (https://crates.io/crates/vsock) to bind
-    //   VsockListener::bind(VMADDR_CID_ANY, 8888) on a real Firecracker VM.
-    let socket_path = std::env::var("VM_AGENT_SOCKET")
-        .unwrap_or_else(|_| "/run/vm-agent.sock".to_string());
+    if std::env::var("VM_AGENT_DEV").is_ok() {
+        run_unix_listener();
+    } else {
+        run_vsock_listener();
+    }
+}
 
-    // Remove stale socket from a previous run.
-    let _ = std::fs::remove_file(&socket_path);
+#[cfg(target_os = "linux")]
+fn run_vsock_listener() {
+    use vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
 
-    let listener = UnixListener::bind(&socket_path).expect("vm-agent: failed to bind Unix socket");
+    let listener = VsockListener::bind(&VsockAddr::new(VMADDR_CID_ANY, EXEC_PORT))
+        .expect("vm-agent: failed to bind AF_VSOCK");
 
-    eprintln!("vm-agent: listening on {}", socket_path);
+    eprintln!("vm-agent: listening on vsock port {}", EXEC_PORT);
 
     for stream in listener.incoming() {
         match stream {
             Ok(conn) => {
-                // Handle each connection synchronously in Phase 1.
-                // Phase 2: spawn a thread per connection for concurrency.
                 if let Err(e) = handle_connection(conn) {
                     eprintln!("vm-agent: connection error: {}", e);
                 }
@@ -79,10 +64,40 @@ fn main() {
     }
 }
 
-// handle_connection reads one ExecRequest, runs the command, and writes one ExecResponse.
-// Takes ownership of the connection stream.
+#[cfg(not(target_os = "linux"))]
+fn run_vsock_listener() {
+    eprintln!("vm-agent: AF_VSOCK requires Linux; set VM_AGENT_DEV=1 for Unix socket mode");
+    std::process::exit(1);
+}
+
+fn run_unix_listener() {
+    use std::os::unix::net::UnixListener;
+
+    let socket_path = std::env::var("VM_AGENT_SOCKET")
+        .unwrap_or_else(|_| "/run/vm-agent.sock".to_string());
+
+    let _ = std::fs::remove_file(&socket_path);
+
+    let listener =
+        UnixListener::bind(&socket_path).expect("vm-agent: failed to bind Unix socket");
+
+    eprintln!("vm-agent: listening on {}", socket_path);
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(conn) => {
+                if let Err(e) = handle_connection(conn) {
+                    eprintln!("vm-agent: connection error: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("vm-agent: accept error: {}", e);
+            }
+        }
+    }
+}
+
 fn handle_connection<C: Read + Write>(mut conn: C) -> Result<(), Box<dyn std::error::Error>> {
-    // Read the first newline-terminated line as the JSON ExecRequest.
     let line = read_line(&mut conn)?;
     if line.is_empty() {
         return Ok(());
@@ -95,7 +110,6 @@ fn handle_connection<C: Read + Write>(mut conn: C) -> Result<(), Box<dyn std::er
 
     let start = Instant::now();
 
-    // Spawn /bin/sh -c <command> to support full shell syntax.
     let mut child = Command::new("/bin/sh")
         .arg("-c")
         .arg(&req.command)
@@ -105,14 +119,12 @@ fn handle_connection<C: Read + Write>(mut conn: C) -> Result<(), Box<dyn std::er
         .spawn()
         .map_err(|e| format!("vm-agent: spawn: {}", e))?;
 
-    // Write stdin if provided.
     if !req.stdin.is_empty() {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(req.stdin.as_bytes());
         }
     }
 
-    // Collect output (blocks until the child exits).
     let output = child
         .wait_with_output()
         .map_err(|e| format!("vm-agent: wait: {}", e))?;
@@ -127,7 +139,6 @@ fn handle_connection<C: Read + Write>(mut conn: C) -> Result<(), Box<dyn std::er
         duration_ms,
     };
 
-    // Write the response as a single JSON line.
     let resp_json = serde_json::to_string(&resp)?;
     conn.write_all(resp_json.as_bytes())?;
     conn.write_all(b"\n")?;
@@ -140,13 +151,12 @@ fn handle_connection<C: Read + Write>(mut conn: C) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-// read_line reads bytes from the reader until '\n' and returns the line (without the newline).
 fn read_line<R: Read>(reader: &mut R) -> Result<String, Box<dyn std::error::Error>> {
     let mut buf = Vec::new();
     let mut byte = [0u8; 1];
     loop {
         match reader.read(&mut byte) {
-            Ok(0) => break, // EOF
+            Ok(0) => break,
             Ok(_) => {
                 if byte[0] == b'\n' {
                     break;
@@ -164,7 +174,6 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    // MockConn wraps a Cursor for input and a Vec for output.
     struct MockConn {
         reader: Cursor<Vec<u8>>,
         writer: Vec<u8>,

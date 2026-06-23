@@ -77,6 +77,14 @@ type NetworkInterface struct {
 	HostDevName string `json:"host_dev_name"`
 }
 
+// Vsock configures the virtio-vsock device for host↔guest communication.
+type Vsock struct {
+	// GuestCID is the vsock context ID assigned to the guest (must be >= 3).
+	GuestCID uint32 `json:"guest_cid"`
+	// UDSPath is the host-side Unix socket Firecracker uses for vsock emulation.
+	UDSPath string `json:"uds_path"`
+}
+
 // Action names accepted by PUT /actions.
 const (
 	ActionInstanceStart = "InstanceStart"
@@ -101,6 +109,11 @@ func (c *Client) PutDrive(ctx context.Context, drive Drive) error {
 // PutNetworkInterface calls PUT /network-interfaces/{iface_id}.
 func (c *Client) PutNetworkInterface(ctx context.Context, iface NetworkInterface) error {
 	return c.put(ctx, fmt.Sprintf("/network-interfaces/%s", iface.IfaceID), iface)
+}
+
+// PutVsock calls PUT /vsock to attach a virtio-vsock device to the guest.
+func (c *Client) PutVsock(ctx context.Context, vsock Vsock) error {
+	return c.put(ctx, "/vsock", vsock)
 }
 
 // StartInstance calls PUT /actions with InstanceStart to boot the VM.

@@ -10,6 +10,7 @@ edition = "2021"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+vsock = "0.5"
 
 [[bin]]
 name = "vm-agent"
