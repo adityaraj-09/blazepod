@@ -8,17 +8,35 @@
 all: build
 
 ## build: Compile all Go binaries into ./bin/
-build:
-	@echo "==> Building Go services..."
-	go build -o bin/api        ./cmd/api
-	go build -o bin/orchestrator ./cmd/orchestrator
-	go build -o bin/host-agent ./cmd/host-agent
-	@echo "==> Building Rust vm-agent..."
-	cd vm-agent && cargo build --release
-	@cp vm-agent/target/release/vm-agent bin/vm-agent 2>/dev/null || true
-	@echo "==> Building TypeScript SDK..."
-	cd sdk/typescript && npm run build
+build: build-go build-rust build-ts
 	@echo "Build complete. Binaries in ./bin/"
+
+## build-go: Compile Go services (required to run api + host-agent).
+build-go:
+	@echo "==> Building Go services..."
+	@mkdir -p bin
+	go build -o bin/api          ./cmd/api
+	go build -o bin/orchestrator ./cmd/orchestrator
+	go build -o bin/host-agent   ./cmd/host-agent
+
+## build-rust: Build the in-VM vm-agent (optional; skipped if vm-agent/ is missing).
+build-rust:
+	@if [ -f vm-agent/Cargo.toml ]; then \
+		echo "==> Building Rust vm-agent..."; \
+		cd vm-agent && cargo build --release; \
+		cp vm-agent/target/release/vm-agent bin/vm-agent; \
+	else \
+		echo "==> Skipping Rust vm-agent (vm-agent/ not found; Go services still built)"; \
+	fi
+
+## build-ts: Build the TypeScript SDK (optional; skipped if sdk/typescript is missing).
+build-ts:
+	@if [ -f sdk/typescript/package.json ]; then \
+		echo "==> Building TypeScript SDK..."; \
+		cd sdk/typescript && npm run build; \
+	else \
+		echo "==> Skipping TypeScript SDK (sdk/typescript not found)"; \
+	fi
 
 ## test: Run all Go, Rust, and TypeScript tests.
 test: test-go test-rust test-ts
