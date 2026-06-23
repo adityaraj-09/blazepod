@@ -1,0 +1,25 @@
+{
+  "name": "@sandock/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the Sandock sandbox provider API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "sandock": "./bin/sandock.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/client.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sandbox",
+    "firecracker",
+    "microvm"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

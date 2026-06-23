@@ -1,0 +1,106 @@
+// Layer: internal RPC contracts — protobuf definitions for all gRPC communication
+// between the orchestrator and host agents.
+// Generated Go stubs live in proto/gen/ (run `make proto` to regenerate).
+//
+// Service: HostAgent — implemented by cmd/host-agent, called by cmd/orchestrator.
+
+syntax = "proto3";
+
+package sandock.v1;
+
+option go_package = "github.com/sandock/sandock/proto/gen;sandockpb";
+
+// HostAgent is the gRPC service exposed by each host-agent process.
+// The orchestrator calls these RPCs to manage sandbox lifecycle on a specific host.
+service HostAgent {
+  // PlaceSandbox creates and starts a new microVM sandbox on this host.
+  rpc PlaceSandbox(PlaceRequest) returns (PlaceResponse);
+
+  // TerminateSandbox stops the VM and cleans up all resources for a sandbox.
+  rpc TerminateSandbox(TerminateRequest) returns (TerminateResponse);
+
+  // ExecInSandbox runs a command inside a running sandbox and returns output.
+  rpc ExecInSandbox(ExecRequest) returns (ExecResponse);
+
+  // StreamLogs opens a server-side stream of log lines from a running sandbox.
+  rpc StreamLogs(LogRequest) returns (stream LogChunk);
+
+  // Heartbeat is called by the orchestrator to check host health.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// PlaceRequest tells the host agent to create a sandbox matching the spec.
+message PlaceRequest {
+  string sandbox_id          = 1;
+  string tenant_id           = 2;
+  string image_ref           = 3;  // e.g. "base" or "python:3.12"
+  uint32 cpu_millis          = 4;  // thousandths of a CPU
+  uint32 mem_mib             = 5;  // memory in mebibytes
+  uint32 timeout_ms          = 6;  // max sandbox lifetime
+  repeated string egress_allowlist = 7;  // Phase 2: allowed egress CIDRs/hosts
+  string snapshot_key        = 8;  // Phase 2: which snapshot to restore from
+}
+
+// PlaceResponse returns the assigned VM handle to the orchestrator.
+message PlaceResponse {
+  string sandbox_id = 1;
+  // vsock_cid is the vsock context ID assigned to this VM by KVM.
+  // The orchestrator stores this and passes it to exec calls.
+  uint32 vsock_cid  = 2;
+}
+
+// TerminateRequest asks the host agent to stop and clean up a sandbox.
+message TerminateRequest {
+  string sandbox_id = 1;
+  // Reason is a human-readable explanation logged in the audit trail.
+  string reason     = 2;
+}
+
+// TerminateResponse confirms the sandbox has been cleaned up.
+message TerminateResponse {
+  string sandbox_id = 1;
+}
+
+// ExecRequest sends a command to run inside a running sandbox.
+message ExecRequest {
+  string sandbox_id  = 1;
+  string command     = 2;
+  string stdin       = 3;
+  uint32 timeout_ms  = 4;
+}
+
+// ExecResponse returns the result of a completed command.
+message ExecResponse {
+  string stdout      = 1;
+  string stderr      = 2;
+  int32  exit_code   = 3;
+  int64  duration_ms = 4;
+}
+
+// LogRequest opens a streaming log connection for a sandbox.
+message LogRequest {
+  string sandbox_id = 1;
+}
+
+// LogChunk is one chunk of log output from a sandbox.
+message LogChunk {
+  string sandbox_id  = 1;
+  string line        = 2;
+  int64  timestamp   = 3;  // Unix nanoseconds
+  string stream      = 4;  // "stdout" or "stderr"
+}
+
+// HeartbeatRequest carries the orchestrator's view of this host for reconciliation.
+message HeartbeatRequest {
+  string host_id = 1;
+}
+
+// HeartbeatResponse returns real-time host resource metrics.
+message HeartbeatResponse {
+  string host_id         = 1;
+  uint32 active_vms      = 2;
+  uint32 idle_pool_size  = 3;
+  float  cpu_usage_pct   = 4;
+  uint64 mem_used_mib    = 5;
+  uint64 mem_total_mib   = 6;
+}

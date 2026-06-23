@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building a World-Class Sandbox Provider</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #0d0f12;
+    --surface: #13161b;
+    --surface2: #1a1e25;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #e2e4e9;
+    --muted: #6b7280;
+    --accent: #4ade80;
+    --accent-dim: rgba(74,222,128,0.1);
+    --accent-border: rgba(74,222,128,0.25);
+    --blue: #60a5fa;
+    --blue-dim: rgba(96,165,250,0.1);
+    --amber: #fbbf24;
+    --amber-dim: rgba(251,191,36,0.08);
+    --coral: #f87171;
+    --coral-dim: rgba(248,113,113,0.08);
+    --purple: #a78bfa;
+    --purple-dim: rgba(167,139,250,0.08);
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Layout ── */
+  .page { max-width: 860px; margin: 0 auto; padding: 60px 32px 120px; }
+
+  /* ── Header ── */
+  .doc-header { margin-bottom: 64px; border-bottom: 0.5px solid var(--border); padding-bottom: 40px; }
+  .doc-eyebrow { font-size: 11px; font-family: var(--mono); color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 16px; }
+  .doc-title { font-size: 36px; font-weight: 600; line-height: 1.2; color: #fff; margin-bottom: 12px; }
+  .doc-sub { font-size: 16px; color: var(--muted); line-height: 1.6; max-width: 600px; }
+
+  /* ── TOC ── */
+  .toc { background: var(--surface); border: 0.5px solid var(--border); border-radius: 10px; padding: 24px 28px; margin-bottom: 60px; }
+  .toc-title { font-size: 11px; font-family: var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 14px; }
+  .toc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 32px; }
+  .toc-item { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; text-decoration: none; color: var(--muted); font-size: 13px; transition: color 0.15s; }
+  .toc-item:hover { color: var(--text); }
+  .toc-num { font-family: var(--mono); font-size: 11px; color: var(--accent); min-width: 20px; }
+
+  /* ── Sections ── */
+  .section { margin-bottom: 72px; }
+  .section-header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+  .section-num { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-dim); border: 0.5px solid var(--accent-border); border-radius: 4px; padding: 2px 8px; flex-shrink: 0; }
+  .section-title { font-size: 22px; font-weight: 600; color: #fff; }
+  .section-body { color: #b0b7c3; line-height: 1.75; margin-bottom: 20px; }
+
+  /* ── Subsections ── */
+  .sub { margin-bottom: 32px; }
+  .sub-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 10px; padding-left: 12px; border-left: 2px solid var(--accent); }
+  .sub-body { color: #8a92a3; font-size: 14px; line-height: 1.75; margin-bottom: 12px; }
+
+  /* ── Tech tags ── */
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .tag { font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 0.5px solid; }
+  .tag-go    { color: #67e8f9; border-color: rgba(103,232,249,0.25); background: rgba(103,232,249,0.06); }
+  .tag-rust  { color: #fdba74; border-color: rgba(253,186,116,0.25); background: rgba(253,186,116,0.06); }
+  .tag-py    { color: #86efac; border-color: rgba(134,239,172,0.25); background: rgba(134,239,172,0.06); }
+  .tag-ts    { color: #93c5fd; border-color: rgba(147,197,253,0.25); background: rgba(147,197,253,0.06); }
+  .tag-infra { color: #c4b5fd; border-color: rgba(196,181,253,0.25); background: rgba(196,181,253,0.06); }
+  .tag-proto { color: #fde68a; border-color: rgba(253,230,138,0.25); background: rgba(253,230,138,0.06); }
+
+  /* ── Code ── */
+  pre {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    margin-bottom: 18px;
+    color: #abb2bf;
+  }
+  .kw  { color: #c678dd; }
+  .fn  { color: #61afef; }
+  .str { color: #98c379; }
+  .num { color: #d19a66; }
+  .cm  { color: #5c6370; font-style: italic; }
+  .type{ color: #e5c07b; }
+  .op  { color: #56b6c2; }
+
+  /* ── Info cards ── */
+  .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--surface); border: 0.5px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .card-label { font-size: 11px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .card-val { font-size: 13px; color: var(--text); line-height: 1.5; }
+  .card.blue  { border-color: rgba(96,165,250,0.2); background: var(--blue-dim); }
+  .card.green { border-color: var(--accent-border); background: var(--accent-dim); }
+  .card.amber { border-color: rgba(251,191,36,0.2); background: var(--amber-dim); }
+  .card.coral { border-color: rgba(248,113,113,0.2); background: var(--coral-dim); }
+  .card.purple{ border-color: rgba(167,139,250,0.2); background: var(--purple-dim); }
+  .card.blue  .card-label { color: var(--blue); }
+  .card.green .card-label { color: var(--accent); }
+  .card.amber .card-label { color: var(--amber); }
+  .card.coral .card-label { color: var(--coral); }
+  .card.purple .card-label { color: var(--purple); }
+
+  /* ── Flow steps ── */
+  .flow { margin-bottom: 24px; }
+  .flow-step { display: flex; gap: 14px; margin-bottom: 0; position: relative; }
+  .flow-step:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 13px; top: 28px; bottom: -12px; width: 0.5px;
+    background: var(--border2);
+  }
+  .flow-dot { width: 28px; height: 28px; border-radius: 50%; border: 0.5px solid var(--border2); background: var(--surface2); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; color: var(--muted); flex-shrink: 0; margin-top: 2px; }
+  .flow-content { padding-bottom: 20px; flex: 1; }
+  .flow-title { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+  .flow-desc { font-size: 13px; color: #6b7280; line-height: 1.65; }
+
+  /* ── Layer diagram ── */
+  .layer-stack { border: 0.5px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+  .layer { padding: 14px 20px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; gap: 14px; }
+  .layer:last-child { border-bottom: none; }
+  .layer-name { font-family: var(--mono); font-size: 12px; font-weight: 500; min-width: 160px; }
+  .layer-detail { font-size: 13px; color: var(--muted); }
+  .layer-badge { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 3px; margin-left: auto; flex-shrink: 0; }
+
+  /* ── Resources ── */
+  .resource-grid { display: grid; gap: 10px; }
+  .resource { background: var(--surface); border: 0.5px solid var(--border); border-radius: 8px; padding: 14px 18px; display: flex; gap: 14px; align-items: flex-start; }
+  .resource-icon { font-family: var(--mono); font-size: 11px; color: var(--accent); background: var(--accent-dim); border: 0.5px solid var(--accent-border); border-radius: 4px; padding: 3px 7px; flex-shrink: 0; margin-top: 2px; }
+  .resource-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+  .resource-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .resource-tag { font-family: var(--mono); font-size: 10px; color: var(--blue); }
+
+  /* ── Phase roadmap ── */
+  .phases { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+  .phase { background: var(--surface); border: 0.5px solid var(--border); border-radius: 8px; padding: 16px; }
+  .phase-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .phase-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 8px; }
+  .phase-items { list-style: none; }
+  .phase-items li { font-size: 12px; color: var(--muted); padding: 2px 0; padding-left: 14px; position: relative; }
+  .phase-items li::before { content: '→'; position: absolute; left: 0; color: var(--accent); font-size: 11px; }
+  .phase.p1 .phase-label { color: var(--accent); }
+  .phase.p2 .phase-label { color: var(--blue); }
+  .phase.p3 .phase-label { color: var(--purple); }
+
+  /* ── Divider ── */
+  .divider { height: 0.5px; background: var(--border); margin: 48px 0; }
+
+  /* ── Inline code ── */
+  code { font-family: var(--mono); font-size: 12px; background: var(--surface2); border: 0.5px solid var(--border2); border-radius: 3px; padding: 1px 6px; color: #98c379; }
+
+  /* ── Warning / tip boxes ── */
+  .callout { border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; font-size: 13px; line-height: 1.65; border: 0.5px solid; }
+  .callout-title { font-weight: 500; margin-bottom: 4px; font-size: 12px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  .callout.warn  { background: var(--amber-dim); border-color: rgba(251,191,36,0.2); color: #d1b06a; }
+  .callout.warn  .callout-title { color: var(--amber); }
+  .callout.tip   { background: var(--accent-dim); border-color: var(--accent-border); color: #6fa87a; }
+  .callout.tip   .callout-title { color: var(--accent); }
+  .callout.danger{ background: var(--coral-dim); border-color: rgba(248,113,113,0.2); color: #a87373; }
+  .callout.danger .callout-title { color: var(--coral); }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    .card-grid { grid-template-columns: 1fr; }
+    .phases { grid-template-columns: 1fr; }
+    .toc-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="doc-header">
+    <div class="doc-eyebrow">Engineering Reference · Infrastructure</div>
+    <div class="doc-title">Building a World-Class<br>Sandbox Provider</div>
+    <div class="doc-sub">A complete engineering reference covering every layer of the stack — from microVM hypervisors to the control plane API — with language choices, key concepts, and curated resources for each.</div>
+  </div>
+
+  <!-- TOC -->
+  <div class="toc">
+    <div class="toc-title">Contents</div>
+    <div class="toc-grid">
+      <a class="toc-item" href="#s1"><span class="toc-num">01</span>Architecture overview</a>
+      <a class="toc-item" href="#s2"><span class="toc-num">02</span>MicroVM layer (Firecracker)</a>
+      <a class="toc-item" href="#s3"><span class="toc-num">03</span>Container runtime + namespaces</a>
+      <a class="toc-item" href="#s4"><span class="toc-num">04</span>Orchestrator internals</a>
+      <a class="toc-item" href="#s5"><span class="toc-num">05</span>Networking + eBPF</a>
+      <a class="toc-item" href="#s6"><span class="toc-num">06</span>Storage + snapshots</a>
+      <a class="toc-item" href="#s7"><span class="toc-num">07</span>Control plane API</a>
+      <a class="toc-item" href="#s8"><span class="toc-num">08</span>Observability</a>
+      <a class="toc-item" href="#s9"><span class="toc-num">09</span>Security model</a>
+      <a class="toc-item" href="#s10"><span class="toc-num">10</span>Language choices</a>
+      <a class="toc-item" href="#s11"><span class="toc-num">11</span>Build roadmap</a>
+      <a class="toc-item" href="#s12"><span class="toc-num">12</span>Resources to read</a>
+    </div>
+  </div>
+
+  <!-- ── Section 1 ── -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <div class="section-title">Architecture overview</div>
+    </div>
+    <div class="section-body">
+      A sandbox provider is a multi-layer system. Each layer handles a specific isolation primitive. Understanding the full stack before writing code is critical — wrong layer abstractions compound into performance debt that's very hard to unwind.
+    </div>
+    <div class="layer-stack">
+      <div class="layer">
+        <div class="layer-name" style="color:#60a5fa">API gateway / SDK</div>
+        <div class="layer-detail">Auth, quota enforcement, request validation, sandbox spec parsing</div>
+        <div class="layer-badge" style="color:#60a5fa;background:rgba(96,165,250,0.08);border:0.5px solid rgba(96,165,250,0.2)">Go / TS</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#4ade80">Orchestrator</div>
+        <div class="layer-detail">Scheduler, VM pool manager, state machine, policy engine</div>
+        <div class="layer-badge" style="color:#4ade80;background:rgba(74,222,128,0.08);border:0.5px solid rgba(74,222,128,0.2)">Go</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#fbbf24">Host agent</div>
+        <div class="layer-detail">Firecracker VMM manager, snapshot restore, cgroup setup</div>
+        <div class="layer-badge" style="color:#fbbf24;background:rgba(251,191,36,0.08);border:0.5px solid rgba(251,191,36,0.2)">Rust / Go</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#a78bfa">MicroVM (Firecracker)</div>
+        <div class="layer-detail">KVM-backed hardware isolation, virtio devices, memory ballooning</div>
+        <div class="layer-badge" style="color:#a78bfa;background:rgba(167,139,250,0.08);border:0.5px solid rgba(167,139,250,0.2)">Rust (FC)</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#f87171">Kernel namespaces</div>
+        <div class="layer-detail">PID, net, mnt, user, IPC, UTS namespaces + seccomp + cgroup v2</div>
+        <div class="layer-badge" style="color:#f87171;background:rgba(248,113,113,0.08);border:0.5px solid rgba(248,113,113,0.2)">Linux kernel</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#67e8f9">Networking</div>
+        <div class="layer-detail">veth pairs, eBPF XDP, WireGuard, per-sandbox egress policies</div>
+        <div class="layer-badge" style="color:#67e8f9;background:rgba(103,232,249,0.08);border:0.5px solid rgba(103,232,249,0.2)">eBPF / C</div>
+      </div>
+      <div class="layer">
+        <div class="layer-name" style="color:#86efac">Storage</div>
+        <div class="layer-detail">overlayfs layers, QCOW2 snapshots, NVMe-backed block devices</div>
+        <div class="layer-badge" style="color:#86efac;background:rgba(134,239,172,0.08);border:0.5px solid rgba(134,239,172,0.2)">Go / kernel</div>
+      </div>
+    </div>
+    <div class="callout tip">
+      <div class="callout-title">Key insight</div>
+      Each layer must fail independently. A networking bug must not corrupt storage state. Design each layer's failure mode before designing its happy path.
+    </div>
+  </div>
+
+  <!-- ── Section 2 ── -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <div class="section-title">MicroVM layer — Firecracker</div>
+    </div>
+    <div class="section-body">
+      Firecracker is the foundation. It's a KVM-based VMM (Virtual Machine Monitor) written in Rust by AWS for Lambda and Fargate. It boots a stripped Linux kernel in ~125ms cold, exposing only the minimum device model: virtio-net, virtio-block, virtio-vsock, and a serial console. No USB, no PCI hotplug, no BIOS emulation — that's the security surface reduction.
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">How KVM + Firecracker works</div>
+      <div class="sub-body">KVM (Kernel-based Virtual Machine) exposes <code>/dev/kvm</code> — a Linux kernel module that lets userspace programs create and manage VMs using CPU hardware virtualization extensions (Intel VT-x / AMD-V). Firecracker is a KVM client: it opens <code>/dev/kvm</code>, allocates guest physical memory as a mmap'd region, loads a Linux kernel image, sets up virtio devices, and runs the VM. Each Firecracker process = one microVM. The jailer binary further restricts the Firecracker process via seccomp and chroot.</div>
+      <pre><span class="cm">// Simplified: what Firecracker does internally (concept)</span>
+<span class="kw">let</span> kvm = <span class="fn">Kvm::new</span>()<span class="op">?</span>;                          <span class="cm">// open /dev/kvm</span>
+<span class="kw">let</span> vm  = kvm.<span class="fn">create_vm</span>()<span class="op">?</span>;                     <span class="cm">// ioctl KVM_CREATE_VM</span>
+<span class="kw">let</span> mem = <span class="fn">GuestMemoryMmap::new</span>(regions)<span class="op">?</span>;       <span class="cm">// mmap guest RAM</span>
+vm.<span class="fn">set_user_memory_region</span>(mem)<span class="op">?</span>;                <span class="cm">// map into VM</span>
+<span class="kw">let</span> vcpu = vm.<span class="fn">create_vcpu</span>(<span class="num">0</span>)<span class="op">?</span>;                  <span class="cm">// virtual CPU</span>
+<span class="cm">// load kernel into guest memory, set registers, run</span>
+vcpu.<span class="fn">run</span>()<span class="op">?</span>;                                     <span class="cm">// KVM_RUN ioctl — blocks until VM exit</span></pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Snapshot / restore for cold start reduction</div>
+      <div class="sub-body">Firecracker supports pausing a VM and dumping its full state (memory + device state) to disk. On restore, it mmaps the snapshot file and resumes from exactly that point. This is how you get sub-30ms starts: snapshot a VM that's already booted with your base image loaded, store it on NVMe, restore it per request. The writable layer is new per sandbox (overlayfs), so the snapshot is shared read-only.</div>
+      <pre><span class="cm"># Firecracker API — create snapshot</span>
+<span class="fn">PUT</span> /snapshot/create
+{
+  <span class="str">"snapshot_type"</span>: <span class="str">"Full"</span>,
+  <span class="str">"snapshot_path"</span>: <span class="str">"/snapshots/python312-base.snap"</span>,
+  <span class="str">"mem_file_path"</span>:  <span class="str">"/snapshots/python312-base.mem"</span>
+}
+
+<span class="cm"># Restore from snapshot (new VM, same state)</span>
+<span class="fn">PUT</span> /snapshot/load
+{
+  <span class="str">"snapshot_path"</span>: <span class="str">"/snapshots/python312-base.snap"</span>,
+  <span class="str">"mem_backend"</span>: { <span class="str">"backend_type"</span>: <span class="str">"File"</span>, <span class="str">"backend_path"</span>: <span class="str">"/snapshots/python312-base.mem"</span> },
+  <span class="str">"enable_diff_snapshots"</span>: <span class="kw">true</span>
+}</pre>
+    </div>
+
+    <div class="card-grid">
+      <div class="card green"><div class="card-label">Cold start</div><div class="card-val">~125ms (kernel boot from scratch)</div></div>
+      <div class="card blue"><div class="card-label">Warm restore</div><div class="card-val">&lt;30ms (snapshot resume)</div></div>
+      <div class="card amber"><div class="card-label">Memory overhead</div><div class="card-val">~3MB per idle microVM vs ~130MB for QEMU</div></div>
+      <div class="card coral"><div class="card-label">Kernel version</div><div class="card-val">Guest kernel 5.10+ LTS recommended</div></div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-rust">Rust (Firecracker source)</span>
+      <span class="tag tag-infra">KVM</span>
+      <span class="tag tag-infra">virtio</span>
+      <span class="tag tag-infra">vsock</span>
+      <span class="tag tag-infra">jailer</span>
+    </div>
+  </div>
+
+  <!-- ── Section 3 ── -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <div class="section-title">Container runtime + Linux namespaces</div>
+    </div>
+    <div class="section-body">
+      Inside the microVM, you run a minimal init process and container runtime. Understanding what the kernel actually does for isolation is essential — you can't debug namespace issues without this mental model.
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">The 7 namespace types</div>
+      <div class="sub-body">Linux namespaces virtualize system resources. Each sandbox gets its own instance of each namespace, so processes inside see an isolated view of the system.</div>
+      <div class="layer-stack">
+        <div class="layer"><div class="layer-name" style="color:#4ade80;font-size:12px">PID namespace</div><div class="layer-detail">Process tree starts at PID 1. Sandbox can't see or signal host processes.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#60a5fa;font-size:12px">Net namespace</div><div class="layer-detail">Own network stack: interfaces, routing table, iptables rules, socket table.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#fbbf24;font-size:12px">Mount namespace</div><div class="layer-detail">Independent filesystem view. overlayfs provides per-sandbox writable layer.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#a78bfa;font-size:12px">User namespace</div><div class="layer-detail">UID/GID remapping. Root inside = unprivileged user outside.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#f87171;font-size:12px">IPC namespace</div><div class="layer-detail">Isolates System V IPC and POSIX message queues.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#67e8f9;font-size:12px">UTS namespace</div><div class="layer-detail">Own hostname and domain name. Prevents hostname leaks.</div></div>
+        <div class="layer"><div class="layer-name" style="color:#86efac;font-size:12px">Time namespace</div><div class="layer-detail">Independent CLOCK_BOOTTIME offset. (Linux 5.6+)</div></div>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">cgroup v2 — resource enforcement</div>
+      <div class="sub-body">cgroups limit and account for resource usage. v2 (unified hierarchy) is the right choice — it has better semantics for nested containers and delegate mode lets rootless runtimes manage sub-hierarchies.</div>
+      <pre><span class="cm"># Create a cgroup for a sandbox</span>
+mkdir /sys/fs/cgroup/sandboxes/sb-abc123
+
+<span class="cm"># Set limits</span>
+echo <span class="str">"500000 1000000"</span> > /sys/fs/cgroup/sandboxes/sb-abc123/cpu.max   <span class="cm"># 50% of 1 CPU</span>
+echo <span class="str">"536870912"</span>     > /sys/fs/cgroup/sandboxes/sb-abc123/memory.max  <span class="cm"># 512 MiB</span>
+echo <span class="str">"134217728"</span>     > /sys/fs/cgroup/sandboxes/sb-abc123/memory.swap.max
+
+<span class="cm"># OOM event notification (watch memory.events via inotify in your host agent)</span>
+cat /sys/fs/cgroup/sandboxes/sb-abc123/memory.events
+<span class="cm"># → oom 3   (means this cgroup got OOM-killed 3 times)</span></pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">seccomp — syscall allowlisting</div>
+      <div class="sub-body">Even with namespace + cgroup isolation, a sandbox can make arbitrary syscalls. seccomp-bpf filters which syscalls are allowed. Your profile should allowlist ~60–80 syscalls (the minimum for Python/Node to run) and block everything else with SIGKILL (not SIGSYS — attackers can catch SIGSYS).</div>
+      <pre><span class="cm">// seccomp profile skeleton (libseccomp in Go via goseccomp)</span>
+<span class="kw">filter</span> := seccomp.<span class="fn">NewFilter</span>(seccomp.ActKill)   <span class="cm">// default: kill</span>
+<span class="cm">// allow only what's needed</span>
+<span class="kw">for</span> _, sc := <span class="kw">range</span> []<span class="type">string</span>{
+    <span class="str">"read"</span>, <span class="str">"write"</span>, <span class="str">"openat"</span>, <span class="str">"close"</span>, <span class="str">"fstat"</span>, <span class="str">"mmap"</span>,
+    <span class="str">"mprotect"</span>, <span class="str">"munmap"</span>, <span class="str">"brk"</span>, <span class="str">"exit_group"</span>, <span class="str">"futex"</span>,
+    <span class="str">"clone"</span>, <span class="str">"wait4"</span>, <span class="str">"execve"</span>, <span class="cm">/* ... ~60 more */</span>
+} {
+    filter.<span class="fn">AddRule</span>(seccomp.<span class="fn">ScmpSyscall</span>(sc), seccomp.ActAllow)
+}
+filter.<span class="fn">Load</span>()  <span class="cm">// installs the BPF program into the kernel</span></pre>
+    </div>
+    <div class="tags">
+      <span class="tag tag-infra">namespaces(7)</span>
+      <span class="tag tag-infra">cgroups v2</span>
+      <span class="tag tag-infra">seccomp-bpf</span>
+      <span class="tag tag-go">runc</span>
+      <span class="tag tag-go">containerd</span>
+    </div>
+  </div>
+
+  <!-- ── Section 4 ── -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <div class="section-title">Orchestrator internals</div>
+    </div>
+    <div class="section-body">
+      The orchestrator is the central nervous system. It's a stateful Go service that owns the scheduler, VM pool manager, and the sandbox state machine. It communicates with host agents over gRPC.
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Admission → scheduling flow</div>
+      <div class="flow">
+        <div class="flow-step"><div class="flow-dot">1</div><div class="flow-content"><div class="flow-title">Request arrives at API gateway</div><div class="flow-desc">JWT validated, tenant resolved, sandbox spec parsed and validated against JSON schema. Quota checked atomically in Redis (INCR with EXPIRE). If over quota → 429.</div></div></div>
+        <div class="flow-step"><div class="flow-dot">2</div><div class="flow-content"><div class="flow-title">Enqueue to priority queue</div><div class="flow-desc">Internal min-heap keyed by (deadline, priority). Deadline = now + client timeout. Priority = plan tier weight × recency factor.</div></div></div>
+        <div class="flow-step"><div class="flow-dot">3</div><div class="flow-content"><div class="flow-title">Scheduler dequeues + scores hosts</div><div class="flow-desc">For each candidate host: score = 0.4×cpu_fit + 0.35×warm_pool_hit + 0.25×host_health. Highest scorer wins. O(n_hosts) per decision — keep host list &lt;200 per region.</div></div></div>
+        <div class="flow-step"><div class="flow-dot">4</div><div class="flow-content"><div class="flow-title">Host agent receives placement</div><div class="flow-desc">gRPC call to host agent: PlaceSandbox(spec). Agent picks an idle VM from local pool, applies the writable layer, configures the network namespace, returns sandbox handle.</div></div></div>
+        <div class="flow-step"><div class="flow-dot">5</div><div class="flow-content"><div class="flow-title">Sandbox ID returned to client</div><div class="flow-desc">Client gets sandbox_id + exec endpoint (vsock or HTTP on localhost within the VM). State machine: queued → provisioning → running.</div></div></div>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">VM pool manager — demand prediction</div>
+      <pre><span class="cm">// Pool target: EWMA-based demand prediction</span>
+<span class="kw">type</span> <span class="type">PoolManager</span> <span class="kw">struct</span> {
+    ewmaRPS      <span class="type">float64</span>
+    p95DurSec    <span class="type">float64</span>
+    currentPool  <span class="type">int</span>
+}
+
+<span class="kw">func</span> (p *<span class="type">PoolManager</span>) <span class="fn">TargetSize</span>() <span class="type">int</span> {
+    <span class="cm">// Little's Law: avg concurrency = arrival_rate × avg_duration</span>
+    concurrency := p.ewmaRPS * p.p95DurSec
+    headroom     := concurrency * <span class="num">1.3</span>
+    floor        := <span class="num">10</span>
+    <span class="kw">return</span> <span class="fn">max</span>(<span class="type">int</span>(headroom), floor)
+}
+
+<span class="kw">func</span> (p *<span class="type">PoolManager</span>) <span class="fn">UpdateEWMA</span>(newRPS <span class="type">float64</span>) {
+    alpha    := <span class="num">0.3</span>   <span class="cm">// smoothing factor — tune per workload</span>
+    p.ewmaRPS = alpha*newRPS + (<span class="num">1</span>-alpha)*p.ewmaRPS
+}</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">State machine — enforcement rules</div>
+      <div class="sub-body">State transitions must be atomic and append-only in the audit log. Use a compare-and-swap on the state field (etcd or Postgres with optimistic locking). Illegal transitions (e.g. running → queued) must be rejected at the store level, not just application level.</div>
+      <pre><span class="kw">var</span> validTransitions = <span class="kw">map</span>[<span class="type">State</span>][]<span class="type">State</span>{
+    Queued:       {Provisioning, Failed},
+    Provisioning: {Running, Failed},
+    Running:      {Draining, Failed},
+    Draining:     {Terminated},
+    Terminated:   {},  <span class="cm">// terminal — no transitions out</span>
+    Failed:       {},  <span class="cm">// terminal</span>
+}
+
+<span class="kw">func</span> <span class="fn">Transition</span>(from, to <span class="type">State</span>) <span class="type">error</span> {
+    <span class="kw">for</span> _, allowed := <span class="kw">range</span> validTransitions[from] {
+        <span class="kw">if</span> allowed == to { <span class="kw">return nil</span> }
+    }
+    <span class="kw">return</span> fmt.<span class="fn">Errorf</span>(<span class="str">"illegal transition %s→%s"</span>, from, to)
+}</pre>
+    </div>
+
+    <div class="tags">
+      <span class="tag tag-go">Go</span>
+      <span class="tag tag-proto">gRPC / protobuf</span>
+      <span class="tag tag-infra">etcd</span>
+      <span class="tag tag-infra">Redis (quota)</span>
+      <span class="tag tag-infra">Little's Law</span>
+      <span class="tag tag-infra">EWMA</span>
+    </div>
+  </div>
+
+  <!-- ── Section 5 ── -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">05</div>
+      <div class="section-title">Networking — veth, eBPF, WireGuard</div>
+    </div>
+    <div class="section-body">
+      Networking is where most sandbox providers leak tenant isolation. The goal: each sandbox gets its own network stack, egress is filtered at line rate, and there's no path for traffic to traverse between sandboxes.
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">veth pair + network namespaces</div>
+      <div class="sub-body">A veth (virtual ethernet) pair is a linked pair of virtual interfaces — packets in one end come out the other. You put one end inside the sandbox net namespace and keep one on the host. Traffic flows through the pair, and the host end connects to a bridge or is routed directly.</div>
+      <pre><span class="cm"># Setup per-sandbox veth pair (host agent does this in Go via netlink)</span>
+ip link add veth-sb0 type veth peer name veth-sb0-host
+ip link set veth-sb0 netns /proc/&lt;sandbox-pid&gt;/ns/net   <span class="cm"># move into sandbox netns</span>
+ip netns exec sb0 ip addr add 10.0.1.2/24 dev veth-sb0   <span class="cm"># sandbox IP</span>
+ip addr add 10.0.1.1/24 dev veth-sb0-host                <span class="cm"># host side</span>
+ip link set veth-sb0-host up
+ip netns exec sb0 ip route add default via 10.0.1.1      <span class="cm"># default route via host</span></pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">eBPF for egress filtering</div>
+      <div class="sub-body">eBPF programs attached at TC (Traffic Control) layer inspect packets at line rate without entering userspace. For per-sandbox egress policy (allowlist of destination IPs/hostnames), you write a BPF program that parses the IP header, checks against a BPF map (hash map of allowed destinations), and either passes or drops the packet.</div>
+      <pre><span class="cm">// eBPF TC egress program (C, compiled with clang -target bpf)</span>
+<span class="kw">struct</span> bpf_map_def <span class="type">SEC</span>(<span class="str">"maps"</span>) allowed_dsts = {
+    .type        = BPF_MAP_TYPE_LPM_TRIE,     <span class="cm">// longest prefix match — for CIDR allowlists</span>
+    .key_size    = <span class="kw">sizeof</span>(<span class="type">struct</span> bpf_lpm_trie_key) + <span class="num">4</span>,
+    .value_size  = <span class="kw">sizeof</span>(<span class="type">__u32</span>),
+    .max_entries = <span class="num">1024</span>,
+};
+
+<span class="type">SEC</span>(<span class="str">"tc/egress"</span>)
+<span class="type">int</span> <span class="fn">sandbox_egress</span>(<span class="kw">struct</span> __sk_buff *skb) {
+    <span class="kw">void</span> *data     = (<span class="kw">void</span> *)(<span class="type">long</span>)skb->data;
+    <span class="kw">void</span> *data_end = (<span class="kw">void</span> *)(<span class="type">long</span>)skb->data_end;
+    <span class="kw">struct</span> iphdr *ip = data + <span class="kw">sizeof</span>(<span class="kw">struct</span> ethhdr);
+    <span class="kw">if</span> ((<span class="kw">void</span> *)(ip + <span class="num">1</span>) > data_end) <span class="kw">return</span> TC_ACT_SHOT;
+
+    <span class="cm">// LPM lookup on destination IP</span>
+    <span class="kw">struct</span> { <span class="type">__u32</span> prefixlen; <span class="type">__u32</span> addr; } key = { <span class="num">32</span>, ip->daddr };
+    <span class="kw">if</span> (!bpf_map_lookup_elem(&allowed_dsts, &key)) <span class="kw">return</span> TC_ACT_SHOT;
+    <span class="kw">return</span> TC_ACT_OK;
+}</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">WireGuard for tenant-level isolation</div>
+      <div class="sub-body">For enterprise multi-tenancy, each tenant gets a WireGuard tunnel. All sandbox traffic for a tenant is routed through their tunnel endpoint. This adds cryptographic isolation on top of the eBPF filtering — even if eBPF is misconfigured, traffic between tenants can't be read without the WireGuard keys.</div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-infra">eBPF / BPF</span>
+      <span class="tag tag-infra">TC (traffic control)</span>
+      <span class="tag tag-infra">netlink</span>
+      <span class="tag tag-infra">WireGuard</span>
+      <span class="tag tag-go">vishvananda/netlink</span>
+      <span class="tag tag-infra">LPM trie</span>
+    </div>
+  </div>
+
+  <!-- ── Section 6 ── -->
+  <div class="section" id="s6">
+    <div class="section-header">
+      <div class="section-num">06</div>
+      <div class="section-title">Storage — overlayfs + snapshots</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">overlayfs — layered filesystem</div>
+      <div class="sub-body">overlayfs stacks filesystem layers. A shared, read-only lower layer (your base image) is combined with a per-sandbox writable upper layer. Reads hit the upper first, then fall through to the lower. Writes go to the upper only. The lower layer is shared across all sandboxes using the same image — significant RAM/disk savings.</div>
+      <pre><span class="cm"># Mount an overlay filesystem for sandbox sb-abc123</span>
+mount -t overlay overlay \
+  -o lowerdir=/images/python312-base,\
+     upperdir=/sandboxes/sb-abc123/upper,\
+     workdir=/sandboxes/sb-abc123/work \
+  /sandboxes/sb-abc123/rootfs
+
+<span class="cm"># After sandbox exit — wipe the upper layer only</span>
+rm -rf /sandboxes/sb-abc123/upper/*
+<span class="cm"># lower dir untouched — reused by next sandbox</span></pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">QCOW2 snapshots for VM-level state</div>
+      <div class="sub-body">QCOW2 (QEMU Copy-On-Write v2) is the disk format used for Firecracker block device snapshots. A base QCOW2 image contains the kernel + base rootfs. Per-sandbox QCOW2 files use the base as a backing file — only diffs are stored. This is the disk equivalent of overlayfs.</div>
+      <pre><span class="cm"># Create base image</span>
+qemu-img create -f qcow2 base-python312.qcow2 2G
+
+<span class="cm"># Create per-sandbox disk backed by base (copy-on-write)</span>
+qemu-img create -f qcow2 -b base-python312.qcow2 -F qcow2 \
+  sb-abc123.qcow2</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Persistent sandbox state — object store</div>
+      <div class="sub-body">For agent workloads that need to persist state between runs (files written, packages installed), serialize the writable overlay layer to S3/R2 as a tar.zst archive after execution. On next run, restore it before mounting. This is what e2b's filesystem persistence does. Use zstd for compression — it's significantly faster than gzip at similar ratios.</div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card blue"><div class="card-label">Lower layer (shared)</div><div class="card-val">Read-only, shared across all sandboxes of same image</div></div>
+      <div class="card green"><div class="card-label">Upper layer (per-sandbox)</div><div class="card-val">Writable, wiped on sandbox exit</div></div>
+      <div class="card amber"><div class="card-label">Snapshot (VM state)</div><div class="card-val">Firecracker mem + device state on NVMe</div></div>
+      <div class="card purple"><div class="card-label">Persistence (optional)</div><div class="card-val">tar.zst of upper layer → S3/R2</div></div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-infra">overlayfs</span>
+      <span class="tag tag-infra">QCOW2</span>
+      <span class="tag tag-infra">zstd</span>
+      <span class="tag tag-infra">ORAS (OCI registry)</span>
+      <span class="tag tag-go">containerd/snapshotter</span>
+    </div>
+  </div>
+
+  <!-- ── Section 7 ── -->
+  <div class="section" id="s7">
+    <div class="section-header">
+      <div class="section-num">07</div>
+      <div class="section-title">Control plane API</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">External API — REST + WebSocket</div>
+      <div class="sub-body">The public-facing API is a REST API for sandbox lifecycle (create, list, kill) and WebSocket for streaming exec output. Use HTTP/2 for multiplexing. Authentication via API keys (HMAC-SHA256 signed) or JWTs. Rate limiting per tenant via token bucket in Redis.</div>
+      <pre><span class="cm"># SDK usage (what your users write)</span>
+<span class="kw">const</span> sb = <span class="kw">await</span> client.<span class="fn">sandboxes.create</span>({
+  image:   <span class="str">"python:3.12"</span>,
+  cpu:     <span class="num">0.5</span>,
+  memory:  <span class="num">512</span>,
+  timeout: <span class="num">30_000</span>,
+  egress:  [<span class="str">"api.openai.com"</span>, <span class="str">"pypi.org"</span>],
+})
+
+<span class="kw">const</span> result = <span class="kw">await</span> sb.<span class="fn">exec</span>(<span class="str">"python3 -c 'print(42)'"</span>)
+console.<span class="fn">log</span>(result.stdout)  <span class="cm">// "42\n"</span>
+
+<span class="kw">await</span> sb.<span class="fn">kill</span>()</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Internal API — gRPC between orchestrator and host agents</div>
+      <div class="sub-body">All internal communication uses gRPC with protobuf. This gives you typed contracts, bidirectional streaming for log drains, and easy TLS mutual auth between services. Define your proto schema first — it becomes the contract between every internal service.</div>
+      <pre><span class="cm">// orchestrator.proto (excerpt)</span>
+<span class="kw">service</span> <span class="type">HostAgent</span> {
+  <span class="kw">rpc</span> <span class="fn">PlaceSandbox</span>   (<span class="type">PlaceRequest</span>)   <span class="kw">returns</span> (<span class="type">PlaceResponse</span>);
+  <span class="kw">rpc</span> <span class="fn">TerminateSandbox</span>(<span class="type">TerminateReq</span>)  <span class="kw">returns</span> (<span class="type">TerminateResp</span>);
+  <span class="kw">rpc</span> <span class="fn">StreamLogs</span>      (<span class="type">LogRequest</span>)    <span class="kw">returns</span> (<span class="kw">stream</span> <span class="type">LogChunk</span>);
+  <span class="kw">rpc</span> <span class="fn">Heartbeat</span>       (<span class="type">HeartbeatReq</span>) <span class="kw">returns</span> (<span class="type">HeartbeatResp</span>);
+}
+
+<span class="kw">message</span> <span class="type">PlaceRequest</span> {
+  <span class="type">string</span> sandbox_id    = <span class="num">1</span>;
+  <span class="type">string</span> image_ref     = <span class="num">2</span>;
+  <span class="type">uint32</span> cpu_milli     = <span class="num">3</span>;
+  <span class="type">uint32</span> mem_mib       = <span class="num">4</span>;
+  <span class="type">uint32</span> timeout_ms    = <span class="num">5</span>;
+  <span class="kw">repeated</span> <span class="type">string</span> egress_allowlist = <span class="num">6</span>;
+  <span class="type">string</span> snapshot_key  = <span class="num">7</span>;   <span class="cm">// which pool snapshot to restore from</span>
+}</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Exec inside sandbox — vsock</div>
+      <div class="sub-body">vsock (VM socket) is a high-performance socket type for VM↔host communication that doesn't go through the network stack. Inside the VM, your agent listens on a vsock port. The host connects via <code>AF_VSOCK</code> to send exec requests and stream stdio. This is faster than routing through the veth pair and stays isolated from tenant network traffic.</div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-proto">protobuf</span>
+      <span class="tag tag-proto">gRPC</span>
+      <span class="tag tag-ts">TypeScript SDK</span>
+      <span class="tag tag-go">Go SDK</span>
+      <span class="tag tag-infra">vsock (AF_VSOCK)</span>
+      <span class="tag tag-infra">HTTP/2</span>
+    </div>
+  </div>
+
+  <!-- ── Section 8 ── -->
+  <div class="section" id="s8">
+    <div class="section-header">
+      <div class="section-num">08</div>
+      <div class="section-title">Observability</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Metrics — Prometheus + host agent exporters</div>
+      <div class="sub-body">Each host agent exposes a Prometheus metrics endpoint. The orchestrator scrapes all agents and exposes aggregate metrics. Key metrics to instrument from day one:</div>
+      <pre><span class="cm"># Per-sandbox metrics (labeled by tenant_id, image, region)</span>
+sandbox_cold_start_duration_seconds{quantile="0.99"}
+sandbox_warm_start_duration_seconds{quantile="0.99"}
+sandbox_exec_duration_seconds_bucket
+sandbox_oom_kills_total
+sandbox_egress_bytes_total
+
+<span class="cm"># Pool metrics</span>
+vm_pool_idle_count{host="h1"}
+vm_pool_warm_count{host="h1"}
+vm_pool_active_count{host="h1"}
+scheduler_queue_depth
+scheduler_decision_latency_ms{quantile="0.99"}</pre>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Structured logging + audit trail</div>
+      <div class="sub-body">Every state transition emits a structured log event with: sandbox_id, tenant_id, old_state, new_state, host_id, timestamp_ns, reason. These are the source of truth for billing and debugging. Write to a durable append-only store (Kafka → ClickHouse or S3 for long-term).</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Distributed tracing — OpenTelemetry</div>
+      <div class="sub-body">Instrument every gRPC call and critical code path with OpenTelemetry spans. A single sandbox request spans: API handler → quota check → scheduler decision → host agent PlaceSandbox → VM restore → exec. Without tracing, latency regressions are nearly impossible to root-cause across services.</div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-infra">Prometheus</span>
+      <span class="tag tag-infra">OpenTelemetry</span>
+      <span class="tag tag-infra">Grafana</span>
+      <span class="tag tag-infra">ClickHouse</span>
+      <span class="tag tag-infra">Kafka</span>
+    </div>
+  </div>
+
+  <!-- ── Section 9 ── -->
+  <div class="section" id="s9">
+    <div class="section-header">
+      <div class="section-num">09</div>
+      <div class="section-title">Security model</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Defense in depth — layers must be independent</div>
+      <div class="sub-body">No single layer should be the only thing between tenant code and the host. The security model is: microVM hardware isolation → namespace isolation → seccomp syscall filtering → cgroup resource limits → eBPF network policy. A vulnerability in one layer should not give an attacker the next layer.</div>
+    </div>
+
+    <div class="callout danger">
+      <div class="callout-title">Critical: writable layer wipe</div>
+      Before any sandbox slot is reused, the upper overlayfs layer must be fully wiped and the new overlayfs remounted. A missed wipe leaks previous tenant's written files. Use a cryptographic check (hash the empty upper dir) before marking a VM as idle.
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">STONITH before slot reassignment</div>
+      Never reassign a sandbox slot from a host you can't reach. Use out-of-band IPMI/BMC to force-power-cycle the host before considering its slots free. This prevents split-brain state where two tenants think they own the same VM.
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Image supply chain</div>
+      <div class="sub-body">Only allow OCI images from your own registry. Verify image digests (sha256) before mounting as the lower layer. Use ORAS (OCI Registry as Storage) to store and distribute base images with content-addressable integrity guarantees. Never pull from Docker Hub directly at runtime — cache in your registry.</div>
+    </div>
+    <div class="tags">
+      <span class="tag tag-infra">STONITH / IPMI</span>
+      <span class="tag tag-infra">OCI / ORAS</span>
+      <span class="tag tag-infra">seccomp</span>
+      <span class="tag tag-infra">defense in depth</span>
+      <span class="tag tag-infra">content-addressable</span>
+    </div>
+  </div>
+
+  <!-- ── Section 10 ── -->
+  <div class="section" id="s10">
+    <div class="section-header">
+      <div class="section-num">10</div>
+      <div class="section-title">Language choices — and why</div>
+    </div>
+
+    <div class="card-grid">
+      <div class="card green">
+        <div class="card-label">Go — orchestrator + host agent + API</div>
+        <div class="card-val">Best concurrency model for managing thousands of long-lived goroutines (one per sandbox). Low GC pauses (&lt;1ms with tuning). Excellent netlink, gRPC, and kernel interface libraries. Fast compile times for iteration.</div>
+      </div>
+      <div class="card amber">
+        <div class="card-label">Rust — hot path components</div>
+        <div class="card-val">Use for the VM agent inside each microVM (the process that handles exec/stdio). Zero-cost abstractions, no GC, predictable latency. Firecracker itself is Rust — contributes upstream skills. Also ideal for eBPF helpers and any custom VMM extensions.</div>
+      </div>
+      <div class="card blue">
+        <div class="card-label">C — eBPF programs</div>
+        <div class="card-val">eBPF programs are written in restricted C and compiled with clang -target bpf. You can't avoid C here. Use libbpf for the loader. CO-RE (Compile Once, Run Everywhere) removes kernel version dependency.</div>
+      </div>
+      <div class="card purple">
+        <div class="card-label">TypeScript — public SDK + CLI</div>
+        <div class="card-val">SDK that developers actually use. TypeScript gives you type safety in the generated client. Use Zod for runtime validation of API responses. Publish to npm. Also build a Go SDK for backend-heavy users.</div>
+      </div>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-title">Don't use Python for the data plane</div>
+      Python's GIL and GC make it unsuitable for the orchestrator or host agent. It's fine for tooling, tests, and internal scripts, but any code in the request path should be Go or Rust.
+    </div>
+  </div>
+
+  <!-- ── Section 11 ── -->
+  <div class="section" id="s11">
+    <div class="section-header">
+      <div class="section-num">11</div>
+      <div class="section-title">Build roadmap — 3 phases</div>
+    </div>
+
+    <div class="phases">
+      <div class="phase p1">
+        <div class="phase-label">Phase 1 — Foundation (weeks 1–6)</div>
+        <div class="phase-title">Single-host proof of concept</div>
+        <ul class="phase-items">
+          <li>Run Firecracker manually, understand VMM API</li>
+          <li>Write Go host agent: create/kill VMs via FC API</li>
+          <li>Implement overlayfs mount + teardown lifecycle</li>
+          <li>Basic cgroup v2 CPU + mem limits</li>
+          <li>vsock-based exec handler inside VM</li>
+          <li>Minimal REST API: create, exec, kill</li>
+          <li>Target: 200ms p99 cold start on one host</li>
+        </ul>
+      </div>
+      <div class="phase p2">
+        <div class="phase-label">Phase 2 — Hardening (weeks 7–14)</div>
+        <div class="phase-title">Multi-host + pool + security</div>
+        <ul class="phase-items">
+          <li>Snapshot / restore pipeline (&lt;30ms warm starts)</li>
+          <li>VM pool manager with EWMA demand prediction</li>
+          <li>Multi-host orchestrator with gRPC host agents</li>
+          <li>eBPF egress filtering per sandbox</li>
+          <li>seccomp profile for common runtimes</li>
+          <li>Prometheus metrics + basic Grafana dashboards</li>
+          <li>Tenant quota enforcement (Redis)</li>
+          <li>Target: 30ms p99 warm start, 3-nines uptime</li>
+        </ul>
+      </div>
+      <div class="phase p3">
+        <div class="phase-label">Phase 3 — Scale (weeks 15–24)</div>
+        <div class="phase-title">Production-grade operations</div>
+        <ul class="phase-items">
+          <li>STONITH fault tolerance + host health scoring</li>
+          <li>OpenTelemetry distributed tracing</li>
+          <li>OCI image registry + ORAS distribution</li>
+          <li>Filesystem persistence (tar.zst → S3)</li>
+          <li>WireGuard per-tenant network isolation</li>
+          <li>TypeScript + Go SDK releases</li>
+          <li>Load testing: 10k concurrent sandboxes</li>
+          <li>Target: &lt;15ms p99 warm start at scale</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 12 ── -->
+  <div class="section" id="s12">
+    <div class="section-header">
+      <div class="section-num">12</div>
+      <div class="section-title">Resources to read</div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Core papers + specs</div>
+      <div class="resource-grid">
+        <div class="resource"><div class="resource-icon">PDF</div><div><div class="resource-title">Firecracker: Lightweight Virtualization for Serverless Applications (NSDI '20)</div><div class="resource-desc">The original AWS paper. Covers the design decisions, microVM architecture, and performance benchmarks. Essential reading before writing a single line of code.</div><div class="resource-tag">arxiv.org/abs/2102.12892</div></div></div>
+        <div class="resource"><div class="resource-icon">DOC</div><div><div class="resource-title">Linux kernel: namespaces(7), cgroups(7), seccomp(2)</div><div class="resource-desc">The actual man pages. Read namespaces(7) cover to cover. Then clone(2) and unshare(2). This is the ground truth — everything else is built on top.</div><div class="resource-tag">man7.org/linux/man-pages</div></div></div>
+        <div class="resource"><div class="resource-icon">DOC</div><div><div class="resource-title">OCI Runtime Specification</div><div class="resource-desc">Defines the container lifecycle, config.json format, and how runc implements it. Understanding this spec demystifies what Docker/containerd actually do.</div><div class="resource-tag">github.com/opencontainers/runtime-spec</div></div></div>
+        <div class="resource"><div class="resource-icon">PDF</div><div><div class="resource-title">eBPF and XDP for network function virtualization</div><div class="resource-desc">Covers BPF map types (LPM trie for CIDR matching), TC hooks, XDP hook points, and performance characteristics vs iptables.</div><div class="resource-tag">cilium.io/blog/bpf-and-xdp-reference-guide</div></div></div>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Books</div>
+      <div class="resource-grid">
+        <div class="resource"><div class="resource-icon">BOOK</div><div><div class="resource-title">Linux Kernel Development — Robert Love</div><div class="resource-desc">Best introduction to how the kernel works: process scheduler, memory management, VFS, namespaces. Chapter 3 (processes) and Chapter 17 (device drivers / I/O) are most relevant.</div></div></div>
+        <div class="resource"><div class="resource-icon">BOOK</div><div><div class="resource-title">Systems Performance — Brendan Gregg</div><div class="resource-desc">Indispensable for understanding where latency comes from. USE method, CPU flame graphs, eBPF tooling for profiling. Chapter 6 (CPUs) and Chapter 7 (memory) directly relevant to VM performance tuning.</div></div></div>
+        <div class="resource"><div class="resource-icon">BOOK</div><div><div class="resource-title">Designing Distributed Systems — Brendan Burns</div><div class="resource-desc">Covers the orchestrator patterns: sidecar, ambassador, adapter. Chapter on batch processing maps well to the scheduler design.</div></div></div>
+        <div class="resource"><div class="resource-icon">BOOK</div><div><div class="resource-title">Programming with POSIX Threads — David Butenhof</div><div class="resource-desc">The Go runtime is built on pthreads concepts. Understanding mutex semantics, condition variables, and memory ordering helps you reason about concurrency bugs in the host agent.</div></div></div>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Code to read</div>
+      <div class="resource-grid">
+        <div class="resource"><div class="resource-icon">SRC</div><div><div class="resource-title">firecracker-microvm/firecracker</div><div class="resource-desc">Read the src/vmm/ directory. Focus on VmResources, the snapshot module, and the jailer implementation. Rust code is clean and well-commented.</div><div class="resource-tag">github.com/firecracker-microvm/firecracker</div></div></div>
+        <div class="resource"><div class="resource-icon">SRC</div><div><div class="resource-title">opencontainers/runc</div><div class="resource-desc">The reference implementation of the OCI runtime spec. Read libcontainer/: factory_linux.go for container creation, nsenter/ for namespace entry, cgroups/ for cgroup management.</div><div class="resource-tag">github.com/opencontainers/runc</div></div></div>
+        <div class="resource"><div class="resource-icon">SRC</div><div><div class="resource-title">cilium/ebpf (Go library)</div><div class="resource-desc">Best-in-class Go library for loading and managing eBPF programs. Read the examples/ directory. Use this rather than CGO-wrapping libbpf.</div><div class="resource-tag">github.com/cilium/ebpf</div></div></div>
+        <div class="resource"><div class="resource-icon">SRC</div><div><div class="resource-title">vishvananda/netlink</div><div class="resource-desc">Pure Go library for Linux netlink operations: creating veth pairs, setting up routes, managing network namespaces. Your host agent will use this extensively.</div><div class="resource-tag">github.com/vishvananda/netlink</div></div></div>
+        <div class="resource"><div class="resource-icon">SRC</div><div><div class="resource-title">e2b-dev/e2b (open source SDK)</div><div class="resource-desc">Read the SDK and open-source infra layer. Good reference for what the developer-facing API should feel like and how exec/stdio streaming is implemented.</div><div class="resource-tag">github.com/e2b-dev/e2b</div></div></div>
+      </div>
+    </div>
+
+    <div class="sub">
+      <div class="sub-title">Blog posts + talks</div>
+      <div class="resource-grid">
+        <div class="resource"><div class="resource-icon">WEB</div><div><div class="resource-title">AWS Firecracker design blog (2018)</div><div class="resource-desc">The original blog post from the Firecracker team explaining why they didn't use QEMU and the tradeoffs in device model minimalism.</div><div class="resource-tag">aws.amazon.com/blogs/opensource/firecracker-open-source-secure-fast-microvm-serverless</div></div></div>
+        <div class="resource"><div class="resource-icon">WEB</div><div><div class="resource-title">Fly.io: How we built Fly Machines</div><div class="resource-desc">Excellent engineering blog covering exactly this problem: running customer VMs on Firecracker at scale. Covers their orchestrator design, network setup, and lessons learned from production.</div><div class="resource-tag">fly.io/blog/fly-machines</div></div></div>
+        <div class="resource"><div class="resource-icon">WEB</div><div><div class="resource-title">Cloudflare: How we built Workers</div><div class="resource-desc">V8 isolates are a different isolation model (lighter, JS-only), but their blog posts on the orchestration, quota enforcement, and cold start optimization are broadly applicable.</div><div class="resource-tag">blog.cloudflare.com/mitigating-spectre</div></div></div>
+        <div class="resource"><div class="resource-icon">WEB</div><div><div class="resource-title">Julia Evans: How containers work</div><div class="resource-desc">The most accessible explanation of namespaces, cgroups, and overlayfs. Start here if Linux container internals are new to you before reading the man pages.</div><div class="resource-tag">jvns.ca/blog/2020/04/27/new-zine--how-containers-work</div></div></div>
+        <div class="resource"><div class="resource-icon">WEB</div><div><div class="resource-title">Brendan Gregg: BPF Performance Tools</div><div class="resource-desc">Full reference for using eBPF observability tools. bpftrace one-liners for profiling your sandbox provider in production without instrumentation.</div><div class="resource-tag">brendangregg.com/bpf-performance-tools-book.html</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <div style="font-size:12px;color:var(--muted);font-family:var(--mono)">
+    sandbox-provider-guide · generated for IIT Delhi CSE · 2025
+  </div>
+
+</div>
+</body>
+</html>

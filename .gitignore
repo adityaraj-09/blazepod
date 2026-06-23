@@ -1,0 +1,29 @@
+# Go
+bin/
+*.exe
+*.test
+vendor/
+
+# Rust
+vm-agent/target/
+
+# TypeScript SDK
+sdk/typescript/dist/
+sdk/typescript/node_modules/
+
+# eBPF compiled objects
+ebpf/programs/*.o
+
+# Secrets / local config
+deploy/*.local.yaml
+*.env
+*.pem
+*.key
+
+# Snapshots & images (large binary artifacts)
+snapshots/
+images/*.qcow2
+images/*.mem
+
+# OS
+.DS_Store
