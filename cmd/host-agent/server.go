@@ -260,7 +260,12 @@ func (s *hostAgentServer) PlaceSandbox(ctx context.Context, req *PlaceRequest) (
 		}
 		coldStart := time.Since(startTime).Seconds()
 		metrics.SandboxColdStartDuration.WithLabelValues(req.TenantId, req.ImageRef, "local").Observe(coldStart)
-		s.log.Info("VM booted", zap.String("sandbox_id", req.SandboxId), zap.Float64("cold_start_s", coldStart))
+		s.log.Info("VM booted",
+		zap.String("sandbox_id", req.SandboxId),
+		zap.Float64("cold_start_s", coldStart),
+		zap.Uint32("vsock_cid", cid),
+		zap.String("vsock_uds", vsockUDS),
+	)
 	}
 
 	// 7. Record the guest vsock CID configured via PUT /vsock.

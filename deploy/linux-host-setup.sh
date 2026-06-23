@@ -43,6 +43,17 @@ mv "/tmp/release-${FIRECRACKER_VERSION}-${ARCH}/jailer-${FIRECRACKER_VERSION}-${
 chmod +x "${BIN_DIR}/firecracker" "${BIN_DIR}/jailer"
 echo "    Firecracker: $(firecracker --version)"
 
+echo "==> Loading host vsock kernel modules (required for exec over AF_VSOCK)..."
+modprobe vsock 2>/dev/null || true
+modprobe vmw_vsock_virtio_transport 2>/dev/null || true
+modprobe vhost_vsock 2>/dev/null || true
+if [ ! -e /dev/vhost-vsock ]; then
+  echo "WARNING: /dev/vhost-vsock not found. Guest exec over vsock will not work."
+  echo "         Try: apt-get install -y linux-modules-extra-\$(uname -r) && modprobe vhost_vsock"
+else
+  echo "    vsock ready: /dev/vhost-vsock"
+fi
+
 echo "==> Creating directory structure..."
 mkdir -p \
   "${SANDOCK_DIR}/images" \
