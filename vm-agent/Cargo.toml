@@ -1,0 +1,16 @@
+# Layer: vm-agent — Rust in-VM process that handles exec requests from the host.
+# This binary runs inside every Firecracker microVM. It listens on a vsock port
+# for ExecRequest messages, runs the command, and streams the ExecResponse back.
+# Written in Rust for zero-GC predictable latency — exec throughput is latency-sensitive.
+[package]
+name = "vm-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "vm-agent"
+path = "src/main.rs"
